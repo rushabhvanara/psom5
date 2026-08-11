@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HVAC vs HVDC P-Q-Loss Web Simulator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 20px; background-color: #f0f4f8; color: #2c3e50; }
+        .container { max-width: 1300px; margin: 0 auto; background: #ffffff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h2 { text-align: center; margin-bottom: 25px; color: #1a365d; }
+        .layout { display: grid; grid-template-columns: 360px 1fr; gap: 25px; }
+        .controls { background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; }
+        .form-group { margin-bottom: 16px; }
+        label { font-weight: 600; font-size: 0.85rem; display: block; margin-bottom: 6px; }
+        input[type="range"], select { width: 100%; padding: 8px; box-sizing: border-box; }
+        .metric-group { margin-top: 15px; }
+        .card { background: #edf2f7; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 4px solid #3182ce; }
+        .card h4 { margin: 0 0 4px 0; font-size: 0.8rem; text-transform: uppercase; color: #4a5568; }
+        .card .value { font-size: 1.1rem; font-weight: bold; }
+        .charts { display: grid; grid-template-rows: repeat(3, 300px); gap: 20px; }
+        .chart-box { background: #ffffff; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>HVAC vs HVDC Active Power, Reactive Power & Loss Simulator</h2>
+    
+    <div class="layout">
+        <div class="controls">
+            <h3>Simulation Inputs</h3>
+            
+            <div class="form-group">
+                <label>Distance (km): <span id="distVal">500</span></label>
+                <input type="range" id="dist" min="20" max="1500" value="500" step="10">
+            </div>
+
+            <div class="form-group">
+                <label>Active Power Input P_in (MW): <span id="pwrVal">1200</span></label>
+                <input type="range" id="pwr" min="100" max="3000" value="1200" step="50">
+            </div>
+
+            <div class="form-group">
+                <label>Transmission Medium:</label>
+                <select id="medium">
+                    <option value="cable">Subsea / Underground Cable</option>
+                    <option value="overhead">Overhead Line (OHL)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>HVDC Converter Tech:</label>
+                <select id="hvdcTech">
+                    <option value="vsc">VSC-HVDC (MMC IGBT - Flexible Q)</option>
+                    <option value="lcc">LCC-HVDC (Thyristor - Consumes Q)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Voltage Level:</label>
+                <select id="voltage">
+                    <option value="400">400 kV AC / ±400 kV DC</option>
+                    <option value="500" selected>500 kV AC / ±500 kV DC</option>
+                    <option value="800">765 kV AC / ±800 kV UHVDC</option>
+                </select>
+            </div>
+
+            <div class="metric-group">
+                <div class="card" style="border-left-color: #e53e3e;">
+                    <h4>HVAC Active Loss (P_loss)</h4>
+                    <div class="value" id="hvacLossVal">0 MW (0%)</div>
+                </div>
+
+                <div class="card" style="border-left-color: #38a169;">
+                    <h4>HVDC Active Loss (P_loss)</h4>
+                    <div class="value" id="hvdcLossVal">0 MW (0%)</div>
+                </div>
+
+                <div class="card" style="border-left-color: #dd6b20;">
+                    <h4>AC Charging Q_gen (Cable/Line)</h4>
+                    <div class="value" id="qcVal">0 MVAR</div>
+                </div>
+
+                <div class="card" style="border-left-color: #805ad5;">
+                    <h4>HVDC Station Q Capability</h4>
+                    <div class="value" id="hvdcQVal">0 MVAR</div>
+                </div>
+
+                <div class="card" style="border-left-color: #3182ce;">
+                    <h4>AC Active Power Derating</h4>
+                    <div class="value" id="derateVal">0% Derated</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts">
+            <div class="chart-box"><canvas id="lossChart"></canvas></div>
+            <div class="chart-box"><canvas id="qChart"></canvas></div>
+            <div class="chart-box"><canvas id="effChart"></canvas></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let lossChart, qChart, effChart;
+
+    function runSim() {
+        const d = parseFloat(document.getElementById('dist').value);
+        const P_in = parseFloat(document.getElementById('pwr').value);
+        const medium = document.getElementById('medium').value;
+        const hvdcTech = document.getElementById('hvdcTech').value;
+        const V_line = parseFloat(document.getElementById('voltage').value);
+
+        document.getElementById('distVal').innerText = d;
+        document.getElementById('pwrVal').innerText = P_in;
+
+        // Constants & Line Specs
+        const f = 50; // 50 Hz
+        const C_km = (medium === 'cable') ? 0.20e-6 : 0.011e-6; // Farads/km
+        const R_dc_km = 0.022; // Ohms/km
+        const R_ac_km = R_dc_km * 1.15; // 15% skin effect penalty
+        const V_ph = (V_line * 1000) / Math.sqrt(3);
+
+        // 1. AC Reactive Power & Charging Current
+        const Ic_per_km = 2 * Math.PI * f * C_km * V_ph; // Amps/km
+        const Total_Ic = Ic_per_km * d; // Total AC charging current (Amps)
+        const Qc = (3 * Math.pow(V_ph, 2) * (2 * Math.PI * f * C_km * d)) / 1e6; // MVAR
+
+        // Active current and total current
+        const I_p = (P_in * 1e6) / (Math.sqrt(3) * V_line * 1000 * 0.95);
+        const I_ac_total = Math.sqrt(Math.pow(I_p, 2) + Math.pow(Total_Ic / 2, 2));
+
+        // AC Losses: Ohmic + Dielectric
+        const P_loss_ac_ohmic = (3 * Math.pow(I_ac_total, 2) * (R_ac_km * d)) / 1e6;
+        const P_loss_ac_diel = (medium === 'cable') ? (2 * Math.PI * f * C_km * d * Math.pow(V_ph, 2) * 0.0007) / 1e6 : 0;
+        const P_loss_ac = P_loss_ac_ohmic + P_loss_ac_diel + (2 * P_in * 0.003); // Trans station losses
+
+        // 2. HVDC Losses & Reactive Power
+        const I_dc = (P_in * 1e6) / (V_line * 1000 * 2); // Bipolar (+/- V)
+        const P_loss_dc_line = (2 * Math.pow(I_dc, 2) * (R_dc_km * d)) / 1e6;
+        const conv_loss_factor = (hvdcTech === 'vsc') ? 0.011 : 0.0075; // Per station
+        const P_loss_dc_conv = 2 * (P_in * conv_loss_factor);
+        const P_loss_dc = P_loss_dc_line + P_loss_dc_conv;
+
+        // Derating Calculation
+        const I_thermal_rating = 2200; // Conductor thermal limit (A)
+        const derating_pct = Math.min(100, (Total_Ic / I_thermal_rating) * 100);
+
+        // Dynamic Text Updates
+        document.getElementById('hvacLossVal').innerText = `${P_loss_ac.toFixed(1)} MW (${((P_loss_ac / P_in) * 100).toFixed(1)}%)`;
+        document.getElementById('hvdcLossVal').innerText = `${P_loss_dc.toFixed(1)} MW (${((P_loss_dc / P_in) * 100).toFixed(1)}%)`;
+        document.getElementById('qcVal').innerText = `${Qc.toFixed(1)} MVAR`;
+        document.getElementById('derateVal').innerText = `${derating_pct.toFixed(1)}% Capacity Taken by Q`;
+
+        if (hvdcTech === 'vsc') {
+            document.getElementById('hvdcQVal').innerText = `±${(P_in * 0.55).toFixed(0)} MVAR Dynamic Control`;
+        } else {
+            document.getElementById('hvdcQVal').innerText = `Consumes -${(P_in * 0.50).toFixed(0)} MVAR (Filters Req.)`;
+        }
+
+        updateCharts(P_in, V_line, medium, hvdcTech);
+    }
+
+    function updateCharts(P_in, V_line, medium, hvdcTech) {
+        const distSteps = [50, 100, 200, 400, 600, 800, 1000, 1250, 1500];
+        const hvacP = [], hvdcP = [], qGenAC = [], qHvdc = [], hvacEff = [], hvdcEff = [];
+
+        const f = 50;
+        const C_km = (medium === 'cable') ? 0.20e-6 : 0.011e-6;
+        const R_dc_km = 0.022, R_ac_km = R_dc_km * 1.15;
+        const V_ph = (V_line * 1000) / Math.sqrt(3);
+
+        distSteps.forEach(d => {
+            // AC
+            const Ic = 2 * Math.PI * f * C_km * V_ph * d;
+            const Qc = (3 * Math.pow(V_ph, 2) * (2 * Math.PI * f * C_km * d)) / 1e6;
+            const I_p = (P_in * 1e6) / (Math.sqrt(3) * V_line * 1000 * 0.95);
+            const I_ac_total = Math.sqrt(Math.pow(I_p, 2) + Math.pow(Ic / 2, 2));
+
+            let loss_ac = (3 * Math.pow(I_ac_total, 2) * (R_ac_km * d)) / 1e6 + (2 * P_in * 0.003);
+            if (medium === 'cable') loss_ac += (2 * Math.PI * f * C_km * d * Math.pow(V_ph, 2) * 0.0007) / 1e6;
+
+            // DC
+            const I_dc = (P_in * 1e6) / (V_line * 1000 * 2);
+            const conv_factor = (hvdcTech === 'vsc') ? 0.011 : 0.0075;
+            const loss_dc = (2 * Math.pow(I_dc, 2) * (R_dc_km * d)) / 1e6 + (2 * P_in * conv_factor);
+
+            hvacP.push(loss_ac.toFixed(1));
+            hvdcP.push(loss_dc.toFixed(1));
+            qGenAC.push(Qc.toFixed(1));
+            qHvdc.push((hvdcTech === 'vsc' ? P_in * 0.55 : -P_in * 0.50).toFixed(1));
+
+            hvacEff.push((Math.max(0, (P_in - loss_ac) / P_in) * 100).toFixed(1));
+            hvdcEff.push((Math.max(0, (P_in - loss_dc) / P_in) * 100).toFixed(1));
+        });
+
+        // Destroy old instances
+        if (lossChart) lossChart.destroy();
+        if (qChart) qChart.destroy();
+        if (effChart) effChart.destroy();
+
+        // Chart 1: Active Power Loss
+        lossChart = new Chart(document.getElementById('lossChart'), {
+            type: 'line',
+            data: {
+                labels: distSteps.map(d => d + ' km'),
+                datasets: [
+                    { label: 'HVAC Total Loss (MW)', data: hvacP, borderColor: '#e53e3e', fill: false },
+                    { label: 'HVDC Total Loss (MW)', data: hvdcP, borderColor: '#38a169', fill: false }
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Active Power Loss (P_loss) vs Distance' } } }
+        });
+
+        // Chart 2: Reactive Power Flow
+        qChart = new Chart(document.getElementById('qChart'), {
+            type: 'line',
+            data: {
+                labels: distSteps.map(d => d + ' km'),
+                datasets: [
+                    { label: 'AC Charging Reactive Power Generated (MVAR)', data: qGenAC, borderColor: '#dd6b20', fill: false },
+                    { label: 'HVDC Converter Q Capacity (MVAR)', data: qHvdc, borderColor: '#805ad5', borderDash: [4, 4], fill: false }
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Reactive Power Balance (Q) vs Distance' } } }
+        });
+
+        // Chart 3: Efficiency Comparison
+        effChart = new Chart(document.getElementById('effChart'), {
+            type: 'line',
+            data: {
+                labels: distSteps.map(d => d + ' km'),
+                datasets: [
+                    { label: 'HVAC Transmission Efficiency (%)', data: hvacEff, borderColor: '#3182ce', fill: false },
+                    { label: 'HVDC Transmission Efficiency (%)', data: hvdcEff, borderColor: '#2b6cb0', fill: false }
+                ]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: 'Overall System Efficiency (%)' } }, scales: { y: { min: 60, max: 100 } } }
+        });
+    }
+
+    document.querySelectorAll('input, select').forEach(el => el.addEventListener('input', runSim));
+    runSim();
+</script>
+<footer style="text-align: center;">
+    <p>© Rushabh D. Vanara | Department of Electrical Engineering, Government Polytechnic, Junagadh</p>
+</footer>
+</body>
+</html>
