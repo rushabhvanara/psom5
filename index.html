@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HVAC vs HVDC Performance Simulator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --hvac: #e53e3e;
+            --hvdc: #38a169;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --border: #e2e8f0;
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            padding: 0; 
+            background-color: var(--bg); 
+            color: var(--text); 
+        }
+
+        .home-link {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            color: var(--text);
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .home-link:hover { color: var(--primary); }
+        .home-link svg { width: 24px; height: 24px; }
+
+        .container { 
+            max-width: 1200px; 
+            margin: 60px auto 40px; 
+            background: #ffffff; 
+            padding: 30px; 
+            border-radius: 16px; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05); 
+        }
+
+        h2 { text-align: center; color: #0f172a; margin-bottom: 30px; }
+
+        .main-grid { 
+            display: grid; 
+            grid-template-columns: 320px 1fr; 
+            gap: 30px; 
+        }
+
+        .controls { 
+            background: #f1f5f9; 
+            padding: 20px; 
+            border-radius: 12px; 
+            height: fit-content;
+        }
+
+        .input-group { margin-bottom: 20px; }
+        label { display: block; font-size: 0.85rem; font-weight: 700; margin-bottom: 8px; color: #475569; }
+        input[type="range"], input[type="number"], select { 
+            width: 100%; 
+            padding: 10px; 
+            border: 1px solid #cbd5e1; 
+            border-radius: 6px; 
+            box-sizing: border-box; 
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .result-card {
+            padding: 15px;
+            border-radius: 12px;
+            background: #fff;
+            border: 1px solid var(--border);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+
+        .result-card h4 { 
+            margin: 0 0 12px 0; 
+            font-size: 0.8rem; 
+            text-transform: uppercase; 
+            color: #64748b;
+            border-bottom: 1px solid #f1f5f9;
+            padding-bottom: 5px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .stat-label { font-size: 0.75rem; font-weight: 600; color: #94a3b8; }
+        .stat-value { font-size: 1.1rem; font-weight: 700; }
+        
+        .hvac-text { color: var(--hvac); }
+        .hvdc-text { color: var(--hvdc); }
+
+        .charts-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .chart-box { 
+            background: white; 
+            padding: 15px; 
+            border-radius: 12px; 
+            border: 1px solid var(--border); 
+            height: 320px;
+        }
+
+        footer { 
+            text-align: center; 
+            padding: 40px 20px; 
+            color: #64748b; 
+            font-size: 0.9rem;
+        }
+
+        footer a { color: var(--primary); text-decoration: none; font-weight: 600; }
+        .heart { color: #e53e3e; }
+
+        @media (max-width: 1024px) {
+            .main-grid { grid-template-columns: 1fr; }
+            .charts-container { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <a href="https://rushabhvanara.github.io" class="home-link">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+        <span>rushabhvanara.github.io</span>
+    </a>
+
+    <div class="container">
+        <h2>HVAC vs HVDC Performance Simulator</h2>
+
+        <div class="main-grid">
+            <div class="controls">
+                <div class="input-group">
+                    <label>Line Length: <span id="lenVal">400</span> km</label>
+                    <input type="range" id="length" min="50" max="2000" value="400" step="10">
+                </div>
+
+                <div class="input-group">
+                    <label>Load Power (MW):</label>
+                    <input type="number" id="load" value="1000" min="100">
+                </div>
+
+                <div class="input-group">
+                    <label>Sending End Voltage (kV):</label>
+                    <input type="number" id="vsend" value="500" min="100">
+                </div>
+
+                <div class="input-group">
+                    <label>Transmission Medium:</label>
+                    <select id="medium">
+                        <option value="overhead">Overhead Line (OHL)</option>
+                        <option value="cable">Underground Cable</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="display">
+                <div class="results-grid">
+                    <div class="result-card">
+                        <h4>Receiving End Voltage</h4>
+                        <div class="stat-row">
+                            <span class="stat-label">HVAC</span>
+                            <span class="stat-value hvac-text" id="resVrAc">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">HVDC</span>
+                            <span class="stat-value hvdc-text" id="resVrDc">--</span>
+                        </div>
+                    </div>
+
+                    <div class="result-card">
+                        <h4>Total System Losses</h4>
+                        <div class="stat-row">
+                            <span class="stat-label">HVAC</span>
+                            <span class="stat-value hvac-text" id="resLossAc">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">HVDC</span>
+                            <span class="stat-value hvdc-text" id="resLossDc">--</span>
+                        </div>
+                    </div>
+
+                    <div class="result-card">
+                        <h4>Transmission Efficiency</h4>
+                        <div class="stat-row">
+                            <span class="stat-label">HVAC</span>
+                            <span class="stat-value hvac-text" id="resEffAc">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">HVDC</span>
+                            <span class="stat-value hvdc-text" id="resEffDc">--</span>
+                        </div>
+                    </div>
+
+                    <div class="result-card">
+                        <h4>Voltage Regulation</h4>
+                        <div class="stat-row">
+                            <span class="stat-label">HVAC</span>
+                            <span class="stat-value hvac-text" id="resRegAc">--</span>
+                        </div>
+                        <div class="stat-row">
+                            <span class="stat-label">HVDC</span>
+                            <span class="stat-value hvdc-text" id="resRegDc">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="charts-container">
+                    <div class="chart-box"><canvas id="efficiencyChart"></canvas></div>
+                    <div class="chart-box"><canvas id="voltageProfileChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let effChart, voltChart;
+
+        function calculate() {
+            const L = parseFloat(document.getElementById('length').value);
+            const Pin = parseFloat(document.getElementById('load').value);
+            const Vs = parseFloat(document.getElementById('vsend').value);
+            const medium = document.getElementById('medium').value;
+            
+            document.getElementById('lenVal').innerText = L;
+
+            // Physics Constants
+            const pf = 0.95;
+            const R_km = 0.03; // Base resistance
+            const X_km = 0.33; // Inductive Reactance
+            const omega = 2 * Math.PI * 50;
+
+            // HVAC Calculation
+            const R = R_km * L;
+            const X = X_km * L;
+            const I_load = (Pin * 1e6) / (Math.sqrt(3) * Vs * 1000 * pf);
+            const phi = Math.acos(pf);
+            // Voltage drop approx
+            const vDropAc = I_load * (R * Math.cos(phi) + X * Math.sin(phi)) / 1000;
+            const Vr_ac = Vs - (vDropAc / Math.sqrt(3));
+            const loss_ac = (3 * Math.pow(I_load, 2) * R / 1e6) + (2 * Pin * 0.005); // Line + Transformer losses
+            const eff_ac = (Pin / (Pin + loss_ac)) * 100;
+            const reg_ac = ((Vs - Vr_ac) / Vr_ac) * 100;
+
+            // HVDC Calculation
+            const R_dc = R_km * 0.8 * L; // Lower resistance (no skin effect)
+            const Idc = (Pin * 1e6) / (Vs * 1000); 
+            const Vr_dc = Vs - (Idc * R_dc / 1000);
+            const loss_dc = (Math.pow(Idc, 2) * R_dc / 1e6) + (2 * Pin * 0.0125); // Line + Converter station losses
+            const eff_dc = (Pin / (Pin + loss_dc)) * 100;
+            const reg_dc = ((Vs - Vr_dc) / Vr_dc) * 100;
+
+            // Update Statistics
+            document.getElementById('resVrAc').innerText = Vr_ac.toFixed(1) + " kV";
+            document.getElementById('resVrDc').innerText = Vr_dc.toFixed(1) + " kV";
+            document.getElementById('resLossAc').innerText = loss_ac.toFixed(1) + " MW";
+            document.getElementById('resLossDc').innerText = loss_dc.toFixed(1) + " MW";
+            document.getElementById('resEffAc').innerText = eff_ac.toFixed(1) + " %";
+            document.getElementById('resEffDc').innerText = eff_dc.toFixed(1) + " %";
+            document.getElementById('resRegAc').innerText = reg_ac.toFixed(2) + " %";
+            document.getElementById('resRegDc').innerText = reg_dc.toFixed(2) + " %";
+
+            updateCharts(L, Pin, Vs, R_km, X_km);
+        }
+
+        function updateCharts(maxDist, Pin, Vs, R_km, X_km) {
+            // Generate 10 data points based on selected distance
+            const steps = 10;
+            const distances = [];
+            const acEff = [], dcEff = [], acVr = [], dcVr = [];
+
+            for (let i = 0; i <= steps; i++) {
+                let d = (maxDist / steps) * i;
+                if (d === 0) d = 0.1; // Avoid zero division
+                distances.push(Math.round(d));
+
+                // Recalculate for each point
+                const R = R_km * d;
+                const X = X_km * d;
+                const I = (Pin * 1e6) / (Math.sqrt(3) * Vs * 1000 * 0.95);
+                const l_ac = (3 * Math.pow(I, 2) * R / 1e6) + (2 * Pin * 0.005);
+                acEff.push((Pin / (Pin + l_ac)) * 100);
+                
+                const Rdc = R_km * 0.8 * d;
+                const Idc = (Pin * 1e6) / (Vs * 1000);
+                const l_dc = (Math.pow(Idc, 2) * Rdc / 1e6) + (2 * Pin * 0.0125);
+                dcEff.push((Pin / (Pin + l_dc)) * 100);
+
+                const vDropAc = I * (R * 0.95 + X * 0.31) / 1000;
+                acVr.push(Vs - (vDropAc / Math.sqrt(3)));
+                dcVr.push(Vs - (Idc * Rdc / 1000));
+            }
+
+            if(effChart) effChart.destroy();
+            if(voltChart) voltChart.destroy();
+
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { title: { display: true, text: 'Distance (km)' } },
+                    y: { beginAtZero: false }
+                },
+                plugins: { legend: { position: 'top' } }
+            };
+
+            const ctx1 = document.getElementById('efficiencyChart').getContext('2d');
+            effChart = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: distances,
+                    datasets: [
+                        { label: 'HVAC Efficiency (%)', data: acEff, borderColor: '#e53e3e', backgroundColor: '#e53e3e33', fill: false, tension: 0.2 },
+                        { label: 'HVDC Efficiency (%)', data: dcEff, borderColor: '#38a169', backgroundColor: '#38a16933', fill: false, tension: 0.2 }
+                    ]
+                },
+                options: { ...commonOptions, plugins: { title: { display: true, text: 'System Efficiency vs. Distance' } } }
+            });
+
+            const ctx2 = document.getElementById('voltageProfileChart').getContext('2d');
+            voltChart = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: distances,
+                    datasets: [
+                        { label: 'HVAC Voltage (kV)', data: acVr, borderColor: '#e53e3e', borderDash: [5, 5], tension: 0.2 },
+                        { label: 'HVDC Voltage (kV)', data: dcVr, borderColor: '#38a169', tension: 0.2 }
+                    ]
+                },
+                options: { ...commonOptions, plugins: { title: { display: true, text: 'Voltage Profile along the Line' } } }
+            });
+        }
+
+        document.querySelectorAll('input, select').forEach(el => el.addEventListener('input', calculate));
+        window.onload = calculate;
+    </script>
+
+    <div style="text-align: center; margin-top: 30px;">
+        <a href="https://rushabhvanara.github.io/psom5a/" style="color: var(--primary); font-weight: 600; text-decoration: none; font-size: 1rem;">Go to alternate advanced simulation &rarr;</a>
+    </div>
+
+    <footer>
+        <p>Made with <span class="heart">❤</span> by <a href="https://rushabhvanara.github.io" target="_blank">Rushabh D. Vanara</a></p>
+        <p>Department of Electrical Engineering, Government Polytechnic, Junagadh</p>
+    </footer>
+</body>
+</html>
